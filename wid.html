@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 12px; }
+    form { display: grid; gap: 6px; max-width: 420px; margin-bottom: 16px; }
+    input, textarea, button { padding: 6px 8px; font-size: 14px; }
+    button { cursor: pointer; }
+    #log { color: green; font-size: 13px; min-height: 18px; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; }
+    th { background: #f5f5f5; position: sticky; top: 0; }
+    .row-new { animation: flash 1s ease-out; }
+    @keyframes flash { from { background: #d4f8d4; } to { background: transparent; } }
+  </style>
+</head>
+<body>
+  <h3>Новая запись</h3>
+  <form id="f">
+    <input name="name" placeholder="Имя" required />
+    <input name="phone" placeholder="Телефон" />
+    <textarea name="comment" placeholder="Комментарий" rows="2"></textarea>
+    <button type="submit">Добавить</button>
+  </form>
+  <div id="log"></div>
+
+  <h3>Последние 20</h3>
+  <table id="recent">
+    <thead>
+      <tr><th>ID</th><th>Имя</th><th>Телефон</th><th>Комментарий</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    let tableId = 'Заявки';      // ← замените на имя своей таблицы
+    let fields  = ['name', 'phone', 'comment']; // ← колонки для формы/таблицы
+    const LIMIT = 20;
+
+    grist.ready({ requiredAccess: 'full' });
+
+    // Можно передавать имя таблицы через настройки виджета
+    grist.onOptions(opts => {
+      if (opts?.tableId) tableId = opts.tableId;
+      if (opts?.fields)  fields  = opts.fields;
+      renderRecent();
+    });
+
+    async function fetchRecent() {
+      // Берём последние LIMIT записей по убыванию id
+      const data = await grist.docApi.fetchTable(tableId);
+      const rows = [];
+      const ids = data.id;
+      for (let i = ids.length - 1; i >= 0 && rows.length < LIMIT; i--) {
+        const row = { id: ids[i] };
+        for (const f of fields) row[f] = data[f]?.[i];
+        rows.push(row);
+      }
+      return rows;
+    }
+
+    async function renderRecent(newId = null) {
+      const rows = await fetchRecent();
+      const tbody = document.querySelector('#recent tbody');
+      tbody.innerHTML = rows.map(r => `
+        <tr class="${r.id === newId ? 'row-new' : ''}">
+          <td>${r.id}</td>
+          ${fields.map(f => `<td>${(r[f] ?? '').toString().replace(/</g,'&lt;')}</td>`).join('')}
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('f').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const row = Object.fromEntries(fd.entries());
+
+      const res = await grist.docApi.applyUserActions([
+        ['AddRecord', tableId, null, row]
+      ]);
+      const newId = res?.retValues?.[0];
+
+      e.target.reset();
+      document.querySelector('#f input')?.focus();
+      document.getElementById('log').textContent = '✓ Добавлено';
+      setTimeout(() => document.getElementById('log').textContent = '', 1500);
+
+      await renderRecent(newId);
+    });
+
+    // Автообновление при изменениях в таблице (в т.ч. из других источников)
+    grist.onRecords(() => renderRecent());
+
+    renderRecent();
+  </script>
+</body>
+</html>
